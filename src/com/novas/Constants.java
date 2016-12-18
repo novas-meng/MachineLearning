@@ -1,4 +1,4 @@
-package com;
+package com.novas;
 
 import java.io.BufferedReader;
 import java.io.File;
