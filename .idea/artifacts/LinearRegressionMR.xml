@@ -1,8 +1,0 @@
-<component name="ArtifactManager">
-  <artifact type="jar" build-on-make="true" name="LinearRegressionMR">
-    <output-path>$PROJECT_DIR$/out/artifacts/LinearRegressionMR</output-path>
-    <root id="archive" name="LinearRegressionMR.jar">
-      <element id="module-output" name="LinearRegresssionMR" />
-    </root>
-  </artifact>
-</component>

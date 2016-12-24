@@ -9,6 +9,7 @@ import java.net.SocketAddress;
 import java.util.ArrayList;
 import java.util.HashMap;
 
+import org.apache.commons.math3.analysis.function.Constant;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FSDataInputStream;
 import org.apache.hadoop.fs.FSDataOutputStream;
@@ -26,7 +27,7 @@ import org.apache.hadoop.mapreduce.lib.output.FileOutputFormat;
 文件格式为
 0,1,2,4,5 依次类推（从0开始）
  */
-public class LogisticRegressionTrain implements Algo
+public class LinearRegressionTrain implements Algo
 {
     public static String readInputStream(FSDataInputStream fsDataInputStream)throws IOException
     {
@@ -133,11 +134,11 @@ public class LogisticRegressionTrain implements Algo
                 }
                 else if(regular.equals("L1"))
                 {
-                     var3=W_list.get(i)-var1*var2*alpha-alpha*l;
+                    var3=W_list.get(i)-var1*var2*alpha-alpha*l;
                 }
                 else if(regular.equals("L2"))
                 {
-                     var3=(1-alpha*l)*W_list.get(i)-var1*var2*alpha;
+                    var3=(1-alpha*l)*W_list.get(i)-var1*var2*alpha;
                 }
                 W_list.set(i, var3);
             }
@@ -226,68 +227,88 @@ public class LogisticRegressionTrain implements Algo
     }
     public  void run(String username,long timestamp) throws IOException, ClassNotFoundException, InterruptedException {
         Constants.init();
-        //获取参数管理器
+//获取参数管理器
         ParamsManager manager=ParamsManager.getParamsManagerInstance();
-        ConnectionManager connectionManager=
-                ConnectionManager.getConnectionManagerInstance("127.0.1.1",9084);
+       // ConnectionManager connectionManager=
+              //  ConnectionManager.getConnectionManagerInstance("127.0.1.1",9084);
         //读取路径
+        System.out.println("HADOOP_PATH="+Constants.HADOOP_PATH);
         Configuration conf=new Configuration();
         conf.addResource(new Path(Constants.HADOOP_PATH+"/etc/hadoop/core-site.xml"));
         String hdfs=conf.get("fs.default.name");
         System.out.println(hdfs);
+
         Path p=new Path(hdfs);
         conf.setStrings("HDFS", hdfs);
-       // connectionManager.sendConf("{4,SUCCESS,"+timestamp+"}");
-        connectionManager.sendConf("{4,SUCCESS,"+timestamp+",Reading the configuration is finished.}");
+        // connectionManager.sendConf("{4,SUCCESS,"+timestamp+"}");
+       // connectionManager.sendConf("{4,SUCCESS,"+timestamp+",Reading the configuration is finished.}");
 
-            FileSystem fs=p.getFileSystem(conf);
-            String parentpath=p.toString();
-            FSDataOutputStream fsos=fs.create(new Path(parentpath+manager.getTmpDir(timestamp)+"model.txt"));
-            int columncount=(Integer)manager.getParamsValue(timestamp,"columncount");
-            for(int i=0;i<=columncount;i++)
-            {
-                fsos.writeUTF("0");
-            }
-            fsos.close();
-            conf.set("model",parentpath+manager.getTmpDir(timestamp)+"model.txt" );
-            String 	trainInputPath=parentpath+manager.getParamsValue(timestamp,"inputPath").toString();
-            String outputPath=parentpath+"/"+timestamp+manager.getParamsValue(timestamp,"outputPath").toString();
-            fs.delete(new Path(outputPath));
-            System.out.println(trainInputPath);
-            System.out.println(outputPath);
-            int loopcount=(Integer)manager.getParamsValue(timestamp,"loopcount");
-            int count=0;
-            double alpha=(Double)manager.getParamsValue(timestamp,"alpha");
-            double l=(Double)manager.getParamsValue(timestamp,"l");
-            String regular=manager.getParamsValue(timestamp,"regular").toString();
-            conf.setDouble("alpha",alpha);
-            conf.setDouble("l",l);
-            conf.set("regular",regular) ;
-            //columnchoosed表示用户选择了哪些列，columncount表示用户选择的列个数
-            conf.set("columnchoosed",parentpath+manager.getTmpDir(timestamp)+"columnchoosed.txt");
-            conf.setInt("columncount",columncount);
-         //   connectionManager.sendConf("the task conf is over");
-        connectionManager.sendConf("{4,SUCCESS,"+timestamp+",Setting the Params is finished.}");
-
-            while(count<loopcount)
-            {
-                connectionManager.sendConf("{4,SUCCESS,"+timestamp+",the "+count+"th MapperReducer is running.}");
-                fs.delete(new Path(outputPath));
-                Job job1=new Job(conf);
-                job1.setJarByClass(LogisticRegressionTrain.class);
-                job1.setMapperClass(DataMapper.class);
-                job1.setReducerClass(DataReducer.class);
-                job1.setMapOutputKeyClass(Text.class);
-                job1.setMapOutputValueClass(Text.class);
-                job1.setOutputKeyClass(Text.class);
-                job1.setOutputValueClass(Text.class);
-                FileInputFormat.addInputPath ( job1 , new Path ( trainInputPath ) ) ;
-                FileOutputFormat.setOutputPath( job1 , new Path ( outputPath ) ) ;
-                job1.waitForCompletion(true);
-                connectionManager.sendConf("{4,SUCCESS,"+timestamp+",the "+count+"th MapperReducer is finished.}");
-                count++;
-
-            }
-          // connectionManager.sendConf("the task is over");
+        FileSystem fs=p.getFileSystem(conf);
+        //parentpath为hdfs路径+用户名
+        String parentpath=p.toString();
+        parentpath=parentpath+"/"+username;
+        FSDataOutputStream fsos=fs.create(new Path(parentpath+"/"+manager.getTmpDir(timestamp)+"model.txt"));
+        int columncount=(Integer)manager.getParamsValue(timestamp,"columncount");
+        for(int i=0;i<=columncount;i++)
+        {
+            fsos.writeUTF("0");
         }
+        fsos.close();
+        //将用户输入文件从本地上传到hdfs
+        System.out.println("上传文件到hdfs中....");
+        String inputfilename=manager.getParamsValue(timestamp,"inputPath").toString();
+        String localInputPath=Constants.ROOT_PATH+"/users/"+username+"/"+inputfilename;
+        String 	hdfsInputPath=parentpath+"/"+inputfilename;
+        fs.copyFromLocalFile(false,new Path(localInputPath),
+                new Path(hdfsInputPath));
+
+        conf.set("model",parentpath+"/"+manager.getTmpDir(timestamp)+"model.txt" );
+        //设置hdfs输出路径和本地输出路径，程序结束时，将文件下载到本地
+        String LocaloutputPath= Constants.ROOT_PATH+"/users/"+username+"/"+timestamp+"/output/"
+                +manager.getParamsValue(timestamp,"outputPath").toString();
+        String hdfsOutputPath=parentpath+"/"+timestamp+"/output";
+        System.out.println(hdfsInputPath);
+        System.out.println(hdfsOutputPath);
+        //配置参数
+        int loopcount=(Integer)manager.getParamsValue(timestamp,"loopcount");
+        int count=0;
+        double alpha=(Double)manager.getParamsValue(timestamp,"alpha");
+        double l=(Integer)manager.getParamsValue(timestamp,"l");
+        String regular=manager.getParamsValue(timestamp,"regular").toString();
+        conf.setDouble("alpha",alpha);
+        conf.setDouble("l",l);
+        conf.set("regular",regular) ;
+        //将用户选择的属性列上传
+        fs.copyFromLocalFile(false,new Path(Constants.ROOT_PATH+"/users/"+username+"/"
+                +timestamp+"/"+"columnchoosed.txt")
+                ,new Path(parentpath+"/"+manager.getTmpDir(timestamp)+"columnchoosed.txt"));
+        //columnchoosed表示用户选择了哪些列，columncount表示用户选择的列个数
+        conf.set("columnchoosed",parentpath+"/"+manager.getTmpDir(timestamp)+"columnchoosed.txt");
+        conf.setInt("columncount",columncount);
+        //   connectionManager.sendConf("the task conf is over");
+       // connectionManager.sendConf("{4,SUCCESS,"+timestamp+",Setting the Params is finished.}");
+
+        while(count<loopcount)
+        {
+          //  connectionManager.sendConf("{4,SUCCESS,"+timestamp+",the "+count+"th MapperReducer is running.}");
+            fs.delete(new Path(hdfsOutputPath));
+            Job job1=new Job(conf);
+            job1.setJarByClass(LinearRegressionTrain.class);
+            job1.setMapperClass(DataMapper.class);
+            job1.setReducerClass(DataReducer.class);
+            job1.setMapOutputKeyClass(Text.class);
+            job1.setMapOutputValueClass(Text.class);
+            job1.setOutputKeyClass(Text.class);
+            job1.setOutputValueClass(Text.class);
+            FileInputFormat.addInputPath ( job1 , new Path ( hdfsInputPath ) ) ;
+            FileOutputFormat.setOutputPath( job1 , new Path ( hdfsOutputPath ) ) ;
+            job1.waitForCompletion(true);
+          //  connectionManager.sendConf("{4,SUCCESS,"+timestamp+",the "+count+"th MapperReducer is finished.}");
+            count++;
+
+        }
+
+        fs.copyToLocalFile(new Path(hdfsOutputPath+"/part-r-00000"),new Path(LocaloutputPath));
+        // connectionManager.sendConf("the task is over");
+    }
 }

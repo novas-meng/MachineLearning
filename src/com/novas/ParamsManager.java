@@ -26,7 +26,7 @@ public class ParamsManager {
      }
     //返回一个临时文件夹
 	 public String getTmpDir(long time) {
-		 return "/" + time + "/";
+		 return time + "/";
 	 }
 	//获取参数类
      public Object getParamsValue(long time,String name) 
