@@ -1,5 +1,7 @@
 package com.novas;
 
+import java.io.BufferedReader;
+import java.io.FileReader;
 import java.io.IOException;
 import java.io.InterruptedIOException;
 import java.net.InetAddress;
@@ -15,6 +17,7 @@ import org.apache.hadoop.fs.FSDataInputStream;
 import org.apache.hadoop.fs.FSDataOutputStream;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
+import org.apache.hadoop.io.DoubleWritable;
 import org.apache.hadoop.io.LongWritable;
 import org.apache.hadoop.io.Text;
 import org.apache.hadoop.mapreduce.Job;
@@ -22,6 +25,8 @@ import org.apache.hadoop.mapreduce.Mapper;
 import org.apache.hadoop.mapreduce.Reducer;
 import org.apache.hadoop.mapreduce.lib.input.FileInputFormat;
 import org.apache.hadoop.mapreduce.lib.output.FileOutputFormat;
+import org.mortbay.util.IO;
+
 /*
 用户选择的维度信息，最终会上传hdfs上，具体文件夹为timestamp/columnchoosed.txt
 文件格式为
@@ -45,7 +50,17 @@ public class LinearRegressionTrain implements Algo
         }
         return new String(tmp);
     }
-
+    public static double getH(ArrayList<Double> W_list,ArrayList<Double> X_list)
+    {
+        double sum=0;
+        for(int i=0;i<W_list.size();i++)
+        {
+            double m=W_list.get(i);
+            double n=X_list.get(i);
+            sum=sum+m*n;
+        }
+        return sum;
+    }
     public static class DataMapper extends Mapper<LongWritable,Text,Text,Text>
     {
         double alpha;
@@ -53,18 +68,9 @@ public class LinearRegressionTrain implements Algo
         String regular;
         String columnchoosed;
         int columncount;
+        int label;
         HashMap<Integer,Integer> columnChoosedMap=new HashMap<>();
-        public double getH(ArrayList<Double> W_list,ArrayList<Double> X_list)
-        {
-            double sum=0;
-            for(int i=0;i<W_list.size();i++)
-            {
-                double m=W_list.get(i);
-                double n=X_list.get(i);
-                sum=sum+m*n;
-            }
-            return sum;
-        }
+
         ArrayList<Double> W_list=new ArrayList<Double>(100000);
         @Override
         protected void setup(Context context) throws IOException,
@@ -77,6 +83,7 @@ public class LinearRegressionTrain implements Algo
             columnchoosed=conf.get("columnchoosed");
             l=conf.getDouble("l",50);
             regular=conf.get("regular","None");
+            label=conf.getInt("label",0);
             System.out.println("alpha="+alpha+"  "+l+"  "+regular);
             Path p=new Path(conf.get("HDFS"));
             //读取模型的初始权值
@@ -122,7 +129,7 @@ public class LinearRegressionTrain implements Algo
                 }
             }
             X_list.add(1.0);
-            double Y=Double.valueOf(var[var.length-1])/100;
+            double Y=Double.valueOf(var[label])/100;
             for(int i=0;i<W_list.size();i++)
             {
                 double var1=getH(W_list,X_list)-Y;
@@ -213,18 +220,79 @@ public class LinearRegressionTrain implements Algo
         }
 
     }
-    public static class PredictMapper extends Mapper<LongWritable,Text,Text,Text>
+    //预测Mapper
+    public static class PredictMapper extends Mapper<LongWritable,Text,Text,DoubleWritable>
     {
+        int columncount;
+        String columnchoosed;
+        HashMap<Integer,Integer> columnChoosedMap=new HashMap<>();
+        ArrayList<Double> W_list=new ArrayList<Double>(100000);
+
         @Override
-        protected void setup(Context context) throws IOException, InterruptedException {
+        protected void setup(Context context) throws IOException,
+                InterruptedException {
+            // TODO Auto-generated method stub
             super.setup(context);
+            Configuration conf=context.getConfiguration() ;
+            columncount=conf.getInt("columncount",0);
+            columnchoosed=conf.get("columnchoosed");
+            Path p=new Path(conf.get("HDFS"));
+            //读取模型的初始权值
+            FileSystem fs = p.getFileSystem ( conf) ;
+            FSDataInputStream fsdis=fs.open(new Path(conf.get("model")));
+            for(int i=0;i<=columncount;i++)
+            {
+                W_list.add(Double.valueOf(fsdis.readUTF()));
+            }
+
+            fsdis.close();
+            //读取用户选择了哪些列
+            FSDataInputStream fsdis_column_choosed=fs.open(new Path(columnchoosed));
+            String columns=readInputStream(fsdis_column_choosed).trim();
+            fsdis_column_choosed.close();
+            System.out.println("colums="+columns);
+            String[] var=columns.split(",");
+            for (int i=0;i<var.length;i++) {
+                System.out.println(Integer.valueOf(var[i]));
+                columnChoosedMap.put(Integer.parseInt(var[i]), 1);
+            }
         }
 
         @Override
         protected void map(LongWritable key, Text value, Context context) throws IOException, InterruptedException {
-            super.map(key, value, context);
+           // super.map(key, value, context);
+            System.out.println(value.toString());
+            String[] var=value.toString().split(",");
+            ArrayList<Double> X_list=new ArrayList<Double>();
+            for(int i=0;i<var.length-1;i++)
+            {
+                if(columnChoosedMap.containsKey(i))
+                {
+                    X_list.add(Double.valueOf(var[i])/100);
+                }
+            }
+            X_list.add(1.0);
+            System.out.println(X_list.get(0)+"  "+W_list.get(0));
+            double predict_result=getH(W_list,X_list);
+            System.out.println(predict_result);
+            context.write(value,new DoubleWritable(predict_result));
         }
     }
+//预测Reducer
+    public static class PredictrReducer extends Reducer<Text,DoubleWritable,Text,DoubleWritable>
+    {
+        @Override
+        protected void reduce(Text arg0, Iterable<DoubleWritable> arg1,Context arg2)
+                throws IOException, InterruptedException {
+            // TODO Auto-generated method stub
+            for(DoubleWritable val:arg1)
+            {
+                arg2.write(arg0, val);
+
+            }
+        }
+    }
+
     public  void run(String username,long timestamp) throws IOException, ClassNotFoundException, InterruptedException {
         Constants.init();
 //获取参数管理器
@@ -247,26 +315,47 @@ public class LinearRegressionTrain implements Algo
         //parentpath为hdfs路径+用户名
         String parentpath=p.toString();
         parentpath=parentpath+"/"+username;
-        FSDataOutputStream fsos=fs.create(new Path(parentpath+"/"+manager.getTmpDir(timestamp)+"model.txt"));
+        String modelPath=parentpath+"/"+manager.getTmpDir(timestamp)+"model.txt";
+        //初始化model.txt文件
+        FSDataOutputStream fsos=fs.create(new Path(modelPath));
         int columncount=(Integer)manager.getParamsValue(timestamp,"columncount");
-        for(int i=0;i<=columncount;i++)
+       for(int i=0;i<=columncount;i++)
         {
             fsos.writeUTF("0");
-        }
+       }
         fsos.close();
-        //将用户输入文件从本地上传到hdfs
-        System.out.println("上传文件到hdfs中....");
-        String inputfilename=manager.getParamsValue(timestamp,"inputPath").toString();
-        String localInputPath=Constants.ROOT_PATH+"/users/"+username+"/"+inputfilename;
-        String 	hdfsInputPath=parentpath+"/"+inputfilename;
+        //获取用户选择的标签列
+        int  label=(Integer)manager.getParamsValue(timestamp,"label");
+        conf.setInt("label",label);
+        //将用户训练输入文件从本地上传到hdfs
+        System.out.println("上传训练文件到hdfs中....");
+        String trainInputFileName=manager.getParamsValue(timestamp,"trainInputPath").toString();
+        String localInputPath=Constants.ROOT_PATH+"/users/"+username+"/"+trainInputFileName;
+        String 	hdfsInputPath=parentpath+"/"+trainInputFileName;
         fs.copyFromLocalFile(false,new Path(localInputPath),
                 new Path(hdfsInputPath));
+        //用户将预测输入文件上传到hdfs中
+        System.out.println("上传预测文件到hdfs中....");
+
+        String predictInputFileName=manager.getParamsValue(timestamp,"predictInputPath").toString();
+        String localPredictInputPath=Constants.ROOT_PATH+"/users/"+username+"/"+predictInputFileName;
+        System.out.println(localPredictInputPath);
+        String 	hdfsPredictInputPath=parentpath+"/"+predictInputFileName;
+        fs.copyFromLocalFile(false,new Path(localPredictInputPath),
+                new Path(hdfsPredictInputPath));
+
 
         conf.set("model",parentpath+"/"+manager.getTmpDir(timestamp)+"model.txt" );
         //设置hdfs输出路径和本地输出路径，程序结束时，将文件下载到本地
-        String LocaloutputPath= Constants.ROOT_PATH+"/users/"+username+"/"+timestamp+"/output/"
-                +manager.getParamsValue(timestamp,"outputPath").toString();
-        String hdfsOutputPath=parentpath+"/"+timestamp+"/output";
+        String localOutputPath= Constants.ROOT_PATH+"/users/"+username+"/"+timestamp+"/modelOutput/"
+                +manager.getParamsValue(timestamp,"modelOutputPath").toString();
+        String hdfsOutputPath=parentpath+"/"+timestamp+"/modelOutput";
+        //设置hdfs预测输出路径和本地预测输出路径 ，程序结束时，下载到本地
+        String localPredictOutputPath=Constants.ROOT_PATH+"/users/"+username+"/"+timestamp+"/predictOutput/"
+                +manager.getParamsValue(timestamp,"predictOutputPath").toString();
+        String hdfsPredictOutputPath=parentpath+"/"+timestamp+"/predictOutput";
+
+
         System.out.println(hdfsInputPath);
         System.out.println(hdfsOutputPath);
         //配置参数
@@ -308,7 +397,44 @@ public class LinearRegressionTrain implements Algo
 
         }
 
-        fs.copyToLocalFile(new Path(hdfsOutputPath+"/part-r-00000"),new Path(LocaloutputPath));
+        fs.copyToLocalFile(new Path(hdfsOutputPath+"/part-r-00000"),new Path(localOutputPath));
+        //重新生成本地model.txt
+        recreateMode(localOutputPath,columncount,modelPath,fs);
+        fs.delete(new Path(hdfsPredictOutputPath));
+        Job predictJob=new Job(conf);
+        predictJob.setJarByClass(LinearRegressionTrain.class);
+        predictJob.setMapperClass(PredictMapper.class);
+        predictJob.setReducerClass(PredictrReducer.class);
+        predictJob.setMapOutputKeyClass(Text.class);
+        predictJob.setMapOutputValueClass(DoubleWritable.class);
+        predictJob.setOutputKeyClass(Text.class);
+        predictJob.setOutputValueClass(DoubleWritable.class);
+        FileInputFormat.addInputPath ( predictJob , new Path ( hdfsPredictInputPath ) ) ;
+        FileOutputFormat.setOutputPath( predictJob , new Path ( hdfsPredictOutputPath ) ) ;
+        predictJob.waitForCompletion(true);
+        fs.copyToLocalFile(new Path(hdfsPredictOutputPath+"/part-r-00000"),
+                new Path(localPredictOutputPath));
         // connectionManager.sendConf("the task is over");
     }
+    //重新生成model，用训练好的model生成
+    public  void recreateMode(String localPath,int columncount,String modelPath,FileSystem fs)throws IOException
+    {
+        BufferedReader bufferedReader=new BufferedReader(new FileReader(localPath));
+        String line=bufferedReader.readLine();
+        double[] w=new double[columncount+1];
+        while (line!=null)
+        {
+           String[] var=line.split("\t");
+            w[Integer.valueOf(var[0])]=Double.valueOf(var[1]);
+            line=bufferedReader.readLine();
+        }
+        bufferedReader.close();
+          FSDataOutputStream fsos=fs.create(new Path(modelPath));
+          for(int i=0;i<=columncount;i++)
+          {
+               fsos.writeUTF(w[i]+"");
+           }
+          fsos.close();
+    }
+
 }

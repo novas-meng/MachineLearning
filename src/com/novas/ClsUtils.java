@@ -17,22 +17,25 @@ public class ClsUtils {
     	 {
     		 fields[i].setAccessible(true);
     		 String value=valueMap.get(fields[i].getName());
-    		 System.out.println("name="+fields[i].getName()+"   "+value);
-    		 Class c=fields[i].getType();
-    		 System.out.println("c="+c.getName()+"  "+(c==Integer.TYPE));
-    		 if(c==String.class)
-    		 {
-    			 fields[i].set(obj, value);
-    		 }
-    		 else if(c==Integer.TYPE)
-    		 {
-    			 System.out.println("设置int");
-    			 fields[i].setInt(obj, Integer.valueOf(value));
-    		 }
-    		 else if(c==Double.TYPE)
-    		 {
-    			 fields[i].set(obj, Double.valueOf(value));
-    		 }
+			 if(value!=null)
+			 {
+				 System.out.println("name="+fields[i].getName()+"   "+value);
+				 Class c=fields[i].getType();
+				 System.out.println("c="+c.getName()+"  "+(c==Integer.TYPE));
+				 if(c==String.class)
+				 {
+					 fields[i].set(obj, value);
+				 }
+				 else if(c==Integer.TYPE)
+				 {
+					 System.out.println("设置int");
+					 fields[i].setInt(obj, Integer.valueOf(value));
+				 }
+				 else if(c==Double.TYPE)
+				 {
+					 fields[i].set(obj, Double.valueOf(value));
+				 }
+			 }
     	 } 	 
     	 return obj;
      }
