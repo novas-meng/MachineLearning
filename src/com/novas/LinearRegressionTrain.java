@@ -129,7 +129,7 @@ public class LinearRegressionTrain implements Algo
                 }
             }
             X_list.add(1.0);
-            double Y=Double.valueOf(var[label])/100;
+            double Y=Double.valueOf(var[label]);
             for(int i=0;i<W_list.size();i++)
             {
                 double var1=getH(W_list,X_list)-Y;
@@ -297,8 +297,8 @@ public class LinearRegressionTrain implements Algo
         Constants.init();
 //获取参数管理器
         ParamsManager manager=ParamsManager.getParamsManagerInstance();
-       // ConnectionManager connectionManager=
-              //  ConnectionManager.getConnectionManagerInstance("127.0.1.1",9084);
+        ConnectionManager connectionManager=
+                ConnectionManager.getConnectionManagerInstance(Constants.ip,Constants.port);
         //读取路径
         System.out.println("HADOOP_PATH="+Constants.HADOOP_PATH);
         Configuration conf=new Configuration();
@@ -308,8 +308,6 @@ public class LinearRegressionTrain implements Algo
 
         Path p=new Path(hdfs);
         conf.setStrings("HDFS", hdfs);
-        // connectionManager.sendConf("{4,SUCCESS,"+timestamp+"}");
-       // connectionManager.sendConf("{4,SUCCESS,"+timestamp+",Reading the configuration is finished.}");
 
         FileSystem fs=p.getFileSystem(conf);
         //parentpath为hdfs路径+用户名
@@ -334,6 +332,8 @@ public class LinearRegressionTrain implements Algo
         String 	hdfsInputPath=parentpath+"/"+trainInputFileName;
         fs.copyFromLocalFile(false,new Path(localInputPath),
                 new Path(hdfsInputPath));
+        //发送上传输入文件完成信息
+
         //用户将预测输入文件上传到hdfs中
         System.out.println("上传预测文件到hdfs中....");
 
@@ -374,12 +374,13 @@ public class LinearRegressionTrain implements Algo
         //columnchoosed表示用户选择了哪些列，columncount表示用户选择的列个数
         conf.set("columnchoosed",parentpath+"/"+manager.getTmpDir(timestamp)+"columnchoosed.txt");
         conf.setInt("columncount",columncount);
-        //   connectionManager.sendConf("the task conf is over");
-       // connectionManager.sendConf("{4,SUCCESS,"+timestamp+",Setting the Params is finished.}");
+        connectionManager.sendConf("{4,"+timestamp+","+Constants._1_2_UNDONE+
+                ";"+Constants._2_4_UNDONE+";"+
+                Constants._3_4_UNDONE+";"+Constants._4_5_UNDONE+"}");
 
+        connectionManager.sendConf("{4,"+timestamp+","+Constants._1_2_RUNNING+"}");
         while(count<loopcount)
         {
-          //  connectionManager.sendConf("{4,SUCCESS,"+timestamp+",the "+count+"th MapperReducer is running.}");
             fs.delete(new Path(hdfsOutputPath));
             Job job1=new Job(conf);
             job1.setJarByClass(LinearRegressionTrain.class);
@@ -396,7 +397,9 @@ public class LinearRegressionTrain implements Algo
             count++;
 
         }
-
+        connectionManager.sendConf("{4,"+timestamp+","+Constants._1_2_DONE+"}");
+        connectionManager.sendConf("{4,"+timestamp+","+Constants._2_4_RUNNING+"}");
+        connectionManager.sendConf("{4,"+timestamp+","+Constants._3_4_RUNNING+"}");
         fs.copyToLocalFile(new Path(hdfsOutputPath+"/part-r-00000"),new Path(localOutputPath));
         //重新生成本地model.txt
         recreateMode(localOutputPath,columncount,modelPath,fs);
@@ -412,9 +415,12 @@ public class LinearRegressionTrain implements Algo
         FileInputFormat.addInputPath ( predictJob , new Path ( hdfsPredictInputPath ) ) ;
         FileOutputFormat.setOutputPath( predictJob , new Path ( hdfsPredictOutputPath ) ) ;
         predictJob.waitForCompletion(true);
+        connectionManager.sendConf("{4,"+timestamp+","+Constants._2_4_DONE+"}");
+        connectionManager.sendConf("{4,"+timestamp+","+Constants._3_4_DONE+"}");
+        connectionManager.sendConf("{4,"+timestamp+","+Constants._4_5_RUNNING+"}");
         fs.copyToLocalFile(new Path(hdfsPredictOutputPath+"/part-r-00000"),
                 new Path(localPredictOutputPath));
-        // connectionManager.sendConf("the task is over");
+        connectionManager.sendConf("{4,"+timestamp+","+Constants._4_5_DONE+"}");
     }
     //重新生成model，用训练好的model生成
     public  void recreateMode(String localPath,int columncount,String modelPath,FileSystem fs)throws IOException
